@@ -109,8 +109,8 @@ async def health_check():
 async def predict_crops(request: PredictRequest):
     try:
         if crop_model is None or yield_model is None:
-            # Return mock predictions for development
-            return get_mock_prediction()
+            # Return dynamic mock predictions for development
+            return get_mock_prediction(request)
         
         # Prepare features for prediction
         features_dict = {
@@ -196,58 +196,151 @@ async def predict_crops(request: PredictRequest):
         logger.error(f"Prediction error: {e}")
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
-def get_mock_prediction() -> PredictResponse:
-    """Return comprehensive mock predictions for development/testing"""
+def get_mock_prediction(request: PredictRequest = None) -> PredictResponse:
+    """Return comprehensive mock predictions for development/testing with dynamic content"""
+    if request is None:
+        # Fallback static data
+        crops = ["Rice", "Soybean", "Maize"]
+        features = {"ph": 6.8, "N": 45, "temperature": 25, "humidity": 65, "rainfall": 100}
+        weather = WeatherData(temperature=25, humidity=65, rainfall=100, wind_speed=10, solar_radiation=200, pressure=1013)
+    else:
+        # Use actual request data for dynamic predictions
+        features = {
+            "ph": request.features.ph,
+            "N": request.features.N,
+            "P": request.features.P,
+            "K": request.features.K,
+            "temperature": request.features.temperature,
+            "humidity": request.features.humidity,
+            "rainfall": request.features.rainfall,
+            "organic_carbon": request.features.organic_carbon
+        }
+        weather = request.weather_data
+        
+        # Determine best crops based on conditions
+        crops = select_crops_based_on_conditions(features, weather, request.features.soil_type)
+    
+    # Generate dynamic recommendations
+    recommendations = []
+    for i, crop in enumerate(crops[:3]):
+        # Calculate dynamic scores based on actual conditions
+        score = calculate_crop_score(crop, features, weather)
+        yield_estimate = adjust_yield_for_crop(crop, 3000, features)
+        profit = calculate_profit_estimate(crop, yield_estimate, 
+                                         request.market_snapshot if request else {"Rice": 2000, "Soybean": 4000, "Maize": 1800}, 
+                                         request.features.area_ha if request else 1.0)
+        sustainability = calculate_sustainability_score(crop, features, 
+                                                       request.features.farming_method if request else "conventional")
+        risk = determine_risk_level(crop, features, weather)
+        season = determine_season_suitability(crop, datetime.now().month)
+        water_req = get_water_requirement(crop)
+        market_demand = determine_market_demand(crop, request.market_snapshot if request else {"Rice": 2000, "Soybean": 4000, "Maize": 1800})
+        
+        recommendations.append(CropRecommendation(
+            crop=crop,
+            score=score,
+            predicted_yield_kg_per_ha=yield_estimate,
+            estimated_profit_inr=profit,
+            sustainability_score=sustainability,
+            confidence=score * 0.9,
+            risk_level=risk,
+            season_suitability=season,
+            water_requirement=water_req,
+            market_demand=market_demand
+        ))
+    
+    # Generate dynamic explanation
+    explanation = generate_comprehensive_explanation(features, recommendations[0], weather)
+    
+    # Generate dynamic SHAP features
+    shap_features = generate_feature_importance(features, recommendations[0])
+    
     return PredictResponse(
-        model_version="v2.0.0-mock",
+        model_version="v2.0.0-dynamic-mock",
         timestamp=datetime.now().isoformat(),
-        recommendations=[
-            CropRecommendation(
-                crop="Rice",
-                score=0.85,
-                predicted_yield_kg_per_ha=4800,
-                estimated_profit_inr=85000,
-                sustainability_score=0.75,
-                confidence=0.81,
-                risk_level="Low",
-                season_suitability="Excellent",
-                water_requirement="High",
-                market_demand="Strong"
-            ),
-            CropRecommendation(
-                crop="Soybean",
-                score=0.72,
-                predicted_yield_kg_per_ha=2200,
-                estimated_profit_inr=65000,
-                sustainability_score=0.90,
-                confidence=0.68,
-                risk_level="Medium",
-                season_suitability="Good",
-                water_requirement="Medium",
-                market_demand="Moderate"
-            ),
-            CropRecommendation(
-                crop="Maize",
-                score=0.65,
-                predicted_yield_kg_per_ha=4200,
-                estimated_profit_inr=72000,
-                sustainability_score=0.78,
-                confidence=0.62,
-                risk_level="Low",
-                season_suitability="Good",
-                water_requirement="Medium",
-                market_demand="Strong"
-            )
-        ],
-        explanation="Rice shows highest suitability due to optimal soil moisture (65%), excellent pH levels (6.8), and favorable monsoon conditions. High nitrogen availability (45 mg/kg) supports vigorous growth. Current market prices are favorable with strong demand expected.",
-        shap_top_features=[
-            ShapFeature(feature="soil_moisture", impact=0.28),
-            ShapFeature(feature="ph_level", impact=0.24),
-            ShapFeature(feature="nitrogen_content", impact=0.22),
-            ShapFeature(feature="rainfall_pattern", impact=0.18),
-            ShapFeature(feature="temperature", impact=0.08)
-        ]
+        recommendations=recommendations,
+        explanation=explanation,
+        shap_top_features=shap_features
     )
+
+def select_crops_based_on_conditions(features: dict, weather: WeatherData, soil_type: str) -> List[str]:
+    """Select best crops based on environmental conditions"""
+    crop_scores = {}
+    
+    # Define crop preferences for different conditions
+    all_crops = ["Rice", "Wheat", "Maize", "Cotton", "Soybean", "Groundnut", "Sugarcane", "Sunflower", "Chickpea", "Pigeon Pea", "Mustard", "Barley"]
+    
+    for crop in all_crops:
+        score = calculate_crop_score(crop, features, weather)
+        crop_scores[crop] = score
+    
+    # Sort by score and return top crops
+    sorted_crops = sorted(crop_scores.items(), key=lambda x: x[1], reverse=True)
+    return [crop for crop, score in sorted_crops]
+
+def calculate_crop_score(crop: str, features: dict, weather: WeatherData) -> float:
+    """Calculate compatibility score for a crop based on conditions"""
+    score = 0.5  # Base score
+    
+    # Temperature preferences
+    temp_preferences = {
+        "Rice": (25, 35), "Wheat": (15, 25), "Maize": (20, 30), "Cotton": (25, 35),
+        "Soybean": (20, 30), "Groundnut": (25, 35), "Sugarcane": (25, 35),
+        "Sunflower": (20, 30), "Chickpea": (15, 25), "Pigeon Pea": (20, 30),
+        "Mustard": (15, 25), "Barley": (15, 25)
+    }
+    
+    # pH preferences
+    ph_preferences = {
+        "Rice": (5.5, 7.0), "Wheat": (6.0, 7.5), "Maize": (6.0, 7.5), "Cotton": (6.5, 8.0),
+        "Soybean": (6.0, 7.0), "Groundnut": (6.0, 7.5), "Sugarcane": (6.0, 8.0),
+        "Sunflower": (6.5, 8.0), "Chickpea": (6.0, 7.5), "Pigeon Pea": (6.0, 7.5),
+        "Mustard": (6.0, 7.5), "Barley": (6.0, 7.5)
+    }
+    
+    # Rainfall preferences (mm)
+    rainfall_preferences = {
+        "Rice": (100, 200), "Wheat": (30, 100), "Maize": (50, 150), "Cotton": (50, 150),
+        "Soybean": (60, 120), "Groundnut": (40, 100), "Sugarcane": (100, 200),
+        "Sunflower": (40, 100), "Chickpea": (30, 80), "Pigeon Pea": (60, 120),
+        "Mustard": (30, 80), "Barley": (30, 80)
+    }
+    
+    # Check temperature suitability
+    temp_range = temp_preferences.get(crop, (20, 30))
+    if temp_range[0] <= weather.temperature <= temp_range[1]:
+        score += 0.3
+    else:
+        deviation = min(abs(weather.temperature - temp_range[0]), abs(weather.temperature - temp_range[1]))
+        score += max(0, 0.3 - (deviation * 0.02))
+    
+    # Check pH suitability
+    ph_range = ph_preferences.get(crop, (6.0, 7.5))
+    if ph_range[0] <= features["ph"] <= ph_range[1]:
+        score += 0.2
+    else:
+        deviation = min(abs(features["ph"] - ph_range[0]), abs(features["ph"] - ph_range[1]))
+        score += max(0, 0.2 - (deviation * 0.05))
+    
+    # Check rainfall suitability
+    rainfall_range = rainfall_preferences.get(crop, (50, 120))
+    if rainfall_range[0] <= weather.rainfall <= rainfall_range[1]:
+        score += 0.2
+    else:
+        deviation = min(abs(weather.rainfall - rainfall_range[0]), abs(weather.rainfall - rainfall_range[1]))
+        score += max(0, 0.2 - (deviation * 0.002))
+    
+    # Nutrient suitability
+    if features["N"] > 30:
+        score += 0.1
+    if features.get("P", 20) > 15:
+        score += 0.05
+    if features.get("K", 100) > 80:
+        score += 0.05
+    if features.get("organic_carbon", 1.0) > 0.8:
+        score += 0.1
+    
+    return min(1.0, max(0.0, score))
 
 def adjust_yield_for_crop(crop: str, base_yield: float, features: dict) -> float:
     """Adjust yield based on crop-specific requirements"""

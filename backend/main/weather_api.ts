@@ -242,7 +242,7 @@ export const getIndianCities = api<CityRequest, CitiesResponse>(
     
     if (req.state) {
       filteredCities = indianCities.filter(c => 
-        c.state.toLowerCase() === req.state.toLowerCase()
+        c.state.toLowerCase() === req.state!.toLowerCase()
       );
     }
     

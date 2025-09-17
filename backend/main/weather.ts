@@ -49,7 +49,7 @@ export async function getTemperature(lat: number, lon: number): Promise<WeatherD
       return getLocationBasedWeatherData(lat, lon);
     }
     
-    const data = await response.json();
+    const data = await response.json() as any;
     
     // Get UV index data
     let uvIndex = 5; // default
@@ -58,7 +58,7 @@ export async function getTemperature(lat: number, lon: number): Promise<WeatherD
         `https://api.openweathermap.org/data/2.5/uvi?lat=${lat}&lon=${lon}&appid=${apiKey}`
       );
       if (uvResponse.ok) {
-        const uvData = await uvResponse.json();
+        const uvData = await uvResponse.json() as any;
         uvIndex = uvData.value || 5;
       }
     } catch (error) {
@@ -66,14 +66,14 @@ export async function getTemperature(lat: number, lon: number): Promise<WeatherD
     }
     
     return {
-      temperature: data.main.temp,
-      humidity: data.main.humidity,
+      temperature: data.main?.temp || 25,
+      humidity: data.main?.humidity || 60,
       rainfall: data.rain?.["1h"] || data.rain?.["3h"] || 0,
       wind_speed: data.wind?.speed || 0,
       solar_radiation: calculateSolarRadiation(data.clouds?.all || 0),
-      pressure: data.main.pressure || 1013,
-      description: data.weather[0]?.description || "Clear sky",
-      feels_like: data.main.feels_like,
+      pressure: data.main?.pressure || 1013,
+      description: data.weather?.[0]?.description || "Clear sky",
+      feels_like: data.main?.feels_like || 25,
       uv_index: uvIndex,
       visibility: (data.visibility || 10000) / 1000, // Convert to km
       cloudiness: data.clouds?.all || 0
@@ -99,7 +99,7 @@ export async function getWeatherForecast(lat: number, lon: number): Promise<Weat
       return getLocationBasedForecast(lat, lon);
     }
     
-    const data = await response.json();
+    const data = await response.json() as any;
     
     // Process 5-day forecast (data comes in 3-hour intervals)
     const dailyForecast = [];
@@ -115,18 +115,18 @@ export async function getWeatherForecast(lat: number, lon: number): Promise<Weat
       
       // Find min/max temps for the day
       const dayItems = data.list.slice(i, i + 8);
-      const temps = dayItems.map(d => d.main.temp);
-      const rainfalls = dayItems.map(d => d.rain?.["3h"] || 0);
-      const humidities = dayItems.map(d => d.main.humidity);
-      const windSpeeds = dayItems.map(d => d.wind?.speed || 0);
+      const temps = dayItems.map((d: any) => d.main.temp);
+      const rainfalls = dayItems.map((d: any) => d.rain?.["3h"] || 0);
+      const humidities = dayItems.map((d: any) => d.main.humidity);
+      const windSpeeds = dayItems.map((d: any) => d.wind?.speed || 0);
       
       dailyForecast.push({
         date,
         temperature_max: Math.max(...temps),
         temperature_min: Math.min(...temps),
-        rainfall: rainfalls.reduce((a, b) => a + b, 0),
-        humidity: humidities.reduce((a, b) => a + b, 0) / humidities.length,
-        wind_speed: windSpeeds.reduce((a, b) => a + b, 0) / windSpeeds.length,
+        rainfall: rainfalls.reduce((a: number, b: number) => a + b, 0),
+        humidity: humidities.reduce((a: number, b: number) => a + b, 0) / humidities.length,
+        wind_speed: windSpeeds.reduce((a: number, b: number) => a + b, 0) / windSpeeds.length,
         description: item.weather[0]?.description || "Clear sky",
         weather_icon: item.weather[0]?.icon || "01d"
       });

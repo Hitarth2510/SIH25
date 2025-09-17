@@ -69,7 +69,7 @@ export async function predictCrops(request: MLRequest): Promise<MLResponse> {
       throw new Error(`ML service error: ${response.status}`);
     }
     
-    return await response.json();
+    return await response.json() as MLResponse;
   } catch (error) {
     console.error("Failed to call ML service:", error);
     // Return mock prediction if ML service fails

@@ -1,6 +1,6 @@
 import { api } from "encore.dev/api";
 import { getTemperature, getWeatherForecast } from "./weather";
-import { getMarketPrices } from "./market";
+import { getMarketPrices, getMarketData } from "./market";
 import { predictCrops, CropRecommendation } from "./ml";
 import { saveRecommendation } from "./history";
 
@@ -9,6 +9,7 @@ export interface RecommendRequest {
   location: {
     lat: number;
     lon: number;
+    state?: string;
   };
   soil_type: string;
   area_ha: number;
@@ -61,8 +62,9 @@ export const recommend = api<RecommendRequest, RecommendResponse>(
     const weather = await getTemperature(req.location.lat, req.location.lon);
     const forecast = await getWeatherForecast(req.location.lat, req.location.lon);
     
-    // Get current market prices
-    const marketPrices = await getMarketPrices();
+    // Get enhanced market data with regional pricing and trends
+    const marketData = await getMarketData();
+    const regionalPrices = await getMarketPrices(req.location.state);
     
     // Get soil auto-fill values
     const soilDefaults = getSoilDefaults(req.soil_type);
@@ -88,11 +90,16 @@ export const recommend = api<RecommendRequest, RecommendResponse>(
       preferred_crops: req.preferred_crops || []
     };
     
-    // Call ML microservice
+    // Call ML microservice with enhanced market data
     const mlRequest = {
       location: req.location,
       features,
-      market_snapshot: marketPrices,
+      market_snapshot: {
+        ...marketData.prices,
+        ...regionalPrices, // Regional prices override national averages
+        msp: marketData.msp,
+        trends: marketData.trends
+      },
       weather_data: weather,
       forecast_data: forecast
     };
@@ -105,22 +112,35 @@ export const recommend = api<RecommendRequest, RecommendResponse>(
     // Analyze weather conditions
     const weatherAnalysis = analyzeWeatherSuitability(weather, forecast);
     
-    // Analyze market conditions
-    const marketAnalysis = analyzeMarketConditions(marketPrices);
+    // Analyze market conditions with enhanced data
+    const marketAnalysis = analyzeMarketConditions(regionalPrices, marketData);
     
     const response: RecommendResponse = {
       ...prediction,
       weather_analysis: weatherAnalysis,
       soil_analysis: soilAnalysis,
-      market_analysis: marketAnalysis
+      market_analysis: marketAnalysis,
+      recommendations: prediction.recommendations.map(rec => ({
+        ...rec,
+        market_insights: {
+          current_price: regionalPrices[rec.crop] || marketData.prices[rec.crop],
+          msp_price: marketData.msp[rec.crop],
+          price_trend: marketData.trends[rec.crop]?.trend || 'stable',
+          demand_level: marketData.trends[rec.crop]?.demand_level || 'medium',
+          price_change_percent: marketData.trends[rec.crop]?.change_percent || 0
+        }
+      }))
     };
     
-    // Save recommendation to history
+    // Save recommendation to history with enhanced market data
     await saveRecommendation({
       userId: req.userId,
       input: req,
       ml_response: response,
-      market_snapshot: marketPrices
+      market_snapshot: {
+        regional_prices: regionalPrices,
+        market_data: marketData
+      }
     });
     
     return response;
@@ -128,7 +148,7 @@ export const recommend = api<RecommendRequest, RecommendResponse>(
 );
 
 function getSoilDefaults(soilType: string): any {
-  const soilLookup = {
+  const soilLookup: Record<string, any> = {
     "Sandy": { ph: 6.0, moisture: 20, N: 20, P: 10, K: 50, organic_carbon: 0.3 },
     "Loamy": { ph: 6.8, moisture: 40, N: 40, P: 20, K: 120, organic_carbon: 0.8 },
     "Clayey": { ph: 7.2, moisture: 60, N: 60, P: 30, K: 100, organic_carbon: 1.1 },
@@ -224,12 +244,41 @@ function analyzeWeatherSuitability(weather: any, forecast: any) {
   };
 }
 
-function analyzeMarketConditions(marketPrices: any) {
-  // Simple market analysis - in production, this would use historical price data
-  const avgPrice = Object.values(marketPrices).reduce((a: number, b: number) => a + b, 0) / Object.values(marketPrices).length;
+function analyzeMarketConditions(regionalPrices: any, marketData: any) {
+  // Enhanced market analysis with trends and MSP comparison
+  const prices = Object.values(regionalPrices) as number[];
+  const avgPrice = prices.reduce((a: number, b: number) => a + b, 0) / prices.length;
+  
+  // Analyze price trends
+  const trendAnalysis: Record<string, any> = {};
+  Object.keys(regionalPrices).forEach(crop => {
+    const currentPrice = regionalPrices[crop];
+    const mspPrice = marketData.msp[crop];
+    const trend = marketData.trends[crop];
+    
+    trendAnalysis[crop] = {
+      current_price: currentPrice,
+      msp_price: mspPrice,
+      price_above_msp: currentPrice > mspPrice,
+      msp_premium_percent: ((currentPrice - mspPrice) / mspPrice * 100).toFixed(1),
+      trend: trend?.trend || 'stable',
+      demand: trend?.demand_level || 'medium'
+    };
+  });
+  
+  // Overall market sentiment
+  const risingTrends = Object.values(marketData.trends).filter((t: any) => t.trend === 'rising').length;
+  const totalCrops = Object.keys(marketData.trends).length;
+  const marketSentiment = risingTrends / totalCrops > 0.6 ? "Bullish" : 
+                         risingTrends / totalCrops < 0.4 ? "Bearish" : "Neutral";
   
   return {
-    price_trends: marketPrices,
-    demand_forecast: avgPrice > 3000 ? "High demand expected" : avgPrice > 2000 ? "Moderate demand" : "Low demand"
+    price_trends: trendAnalysis,
+    market_sentiment: marketSentiment,
+    average_price: Math.round(avgPrice),
+    crops_above_msp: Object.values(trendAnalysis).filter((c: any) => c.price_above_msp).length,
+    demand_forecast: avgPrice > 3500 ? "Strong demand expected across commodities" : 
+                    avgPrice > 2500 ? "Moderate demand with selective opportunities" : 
+                    "Cautious market conditions, focus on cost efficiency"
   };
 }
