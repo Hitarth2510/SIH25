@@ -7,6 +7,8 @@ import { HomePage } from './pages/HomePage';
 import { InputForm } from './pages/InputForm';
 import { ResultsPage } from './pages/ResultsPage';
 import { HistoryPage } from './pages/HistoryPage';
+import { TestResults } from './pages/TestResults';
+import { SimpleResults } from './pages/SimpleResults';
 
 const queryClient = new QueryClient();
 
@@ -32,6 +34,7 @@ function AppInner() {
       <Route path="/input" element={<InputForm />} />
       <Route path="/results" element={<ResultsPage />} />
       <Route path="/history" element={<HistoryPage />} />
+      <Route path="/test" element={<TestResults />} />
     </Routes>
   );
 }

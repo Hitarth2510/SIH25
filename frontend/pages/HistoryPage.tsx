@@ -5,7 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, Calendar, MapPin, TrendingUp, Loader2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
-import backend from '~backend/client';
+// Use direct fetch to Express backend for history to avoid requiring Encore during dev
+const API_BASE = (import.meta as any).env?.VITE_CLIENT_TARGET || 'http://localhost:4000';
+
+async function getJSON<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`GET ${url} failed: ${res.status}`);
+  return res.json();
+}
 
 export function HistoryPage() {
   const navigate = useNavigate();
@@ -20,7 +27,7 @@ export function HistoryPage() {
   const loadHistory = async () => {
     try {
       const userId = `user_${Date.now()}`; // In production, get from auth
-      const response = await backend.main.getRecommendationHistory({ userId });
+      const response = await getJSON<{recommendations: any[]}>(`${API_BASE}/api/history/${userId}`);
       setHistory(response.recommendations);
     } catch (error) {
       console.error('History loading error:', error);

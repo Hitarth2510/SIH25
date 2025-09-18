@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Results Page</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .debug { background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .error { background: #ffebee; border: 1px solid #f44336; }
+        .success { background: #e8f5e9; border: 1px solid #4caf50; }
+    </style>
+</head>
+<body>
+    <h1>Debug Results Page</h1>
+    <button onclick="testSessionStorage()">Test SessionStorage</button>
+    <button onclick="testNavigation()">Test Navigation</button>
+    <button onclick="clearStorage()">Clear Storage</button>
+    
+    <div id="output"></div>
+
+    <script>
+        function log(message, type = 'debug') {
+            const output = document.getElementById('output');
+            const div = document.createElement('div');
+            div.className = `debug ${type}`;
+            div.innerHTML = `<strong>${new Date().toLocaleTimeString()}:</strong> ${message}`;
+            output.appendChild(div);
+        }
+
+        function testSessionStorage() {
+            log('Testing SessionStorage...');
+            
+            // Test data
+            const testData = {
+                model_version: "test_v1.0",
+                timestamp: new Date().toISOString(),
+                recommendations: [
+                    {
+                        crop: "Rice",
+                        score: 0.85,
+                        predicted_yield_kg_per_ha: 4500,
+                        estimated_profit_inr: 45000,
+                        sustainability_score: 0.7,
+                        confidence: 0.8,
+                        risk_level: "Low",
+                        season_suitability: "Kharif",
+                        water_requirement: "High",
+                        market_demand: "High"
+                    }
+                ],
+                explanation: "Test recommendation",
+                shap_top_features: [
+                    { feature: "temperature", impact: 0.3 }
+                ]
+            };
+
+            try {
+                sessionStorage.setItem('cropRecommendations', JSON.stringify(testData));
+                log('✅ Test data stored successfully', 'success');
+                
+                const retrieved = sessionStorage.getItem('cropRecommendations');
+                if (retrieved) {
+                    const parsed = JSON.parse(retrieved);
+                    log(`✅ Data retrieved: ${parsed.recommendations.length} recommendations`, 'success');
+                } else {
+                    log('❌ Failed to retrieve data', 'error');
+                }
+            } catch (error) {
+                log(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+
+        function testNavigation() {
+            log('Testing navigation to results page...');
+            window.location.href = '/results';
+        }
+
+        function clearStorage() {
+            sessionStorage.removeItem('cropRecommendations');
+            log('🗑️ Storage cleared');
+        }
+
+        // Check current storage on load
+        window.onload = function() {
+            const stored = sessionStorage.getItem('cropRecommendations');
+            if (stored) {
+                try {
+                    const parsed = JSON.parse(stored);
+                    log(`📦 Found stored data: ${parsed.recommendations?.length || 0} recommendations`, 'success');
+                } catch (e) {
+                    log('📦 Found corrupted stored data', 'error');
+                }
+            } else {
+                log('📦 No stored data found');
+            }
+        };
+    </script>
+</body>
+</html>

@@ -2,7 +2,12 @@
   "name": "frontend",
   "version": "1.0.0",
   "type": "module",
-  "packageManager": "bun",
+  "packageManager": "npm@10.9.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.3",
     "@radix-ui/react-dialog": "^1.1.15",

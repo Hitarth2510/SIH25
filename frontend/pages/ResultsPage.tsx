@@ -6,22 +6,68 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { ArrowLeft, TrendingUp, DollarSign, Leaf, Info, ThumbsUp, ThumbsDown, Award, BarChart3, Sparkles } from 'lucide-react';
-import type { RecommendResponse } from '~backend/main/recommend';
-import backend from '~backend/client';
+// Define the response type locally to avoid Encore dependency
+interface RecommendResponse {
+  model_version: string;
+  timestamp: string;
+  recommendations: Array<{
+    crop: string;
+    score: number;
+    predicted_yield_kg_per_ha: number;
+    estimated_profit_inr: number;
+    sustainability_score: number;
+    confidence: number;
+    risk_level: string;
+    season_suitability: string;
+    water_requirement: string;
+    market_demand: string;
+  }>;
+  explanation: string;
+  shap_top_features: Array<{
+    feature: string;
+    impact: number;
+  }>;
+}
+
+// Use direct fetch to Express backend for feedback to avoid requiring Encore during dev
+const API_BASE = (import.meta as any).env?.VITE_CLIENT_TARGET || 'http://localhost:4000';
+
+async function postJSON<T>(url: string, body: any): Promise<T> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`POST ${url} failed: ${res.status}`);
+  return res.json();
+}
 
 export function ResultsPage() {
+  console.log('ResultsPage: Component rendering started');
   const navigate = useNavigate();
   const { toast } = useToast();
   const [results, setResults] = useState<RecommendResponse | null>(null);
   const [selectedCrop, setSelectedCrop] = useState<any>(null);
   const [feedbackGiven, setFeedbackGiven] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const storedResults = sessionStorage.getItem('cropRecommendations');
-    if (storedResults) {
-      setResults(JSON.parse(storedResults));
-    } else {
+    setLoading(true);
+    try {
+      const storedResults = sessionStorage.getItem('cropRecommendations');
+      if (storedResults) {
+        const parsedResults = JSON.parse(storedResults);
+        setResults(parsedResults);
+      } else {
+        // If no results, navigate back to input form
+        navigate('/input');
+      }
+    } catch (error) {
+      console.error('Failed to load or parse results:', error);
+      // Navigate away if data is corrupted
       navigate('/input');
+    } finally {
+      setLoading(false);
     }
   }, [navigate]);
 
@@ -31,11 +77,11 @@ export function ResultsPage() {
       const userId = `user_${Date.now()}`;
       const recommendationId = 1; // Mock ID
       
-      await backend.main.submitFeedback({
+      await postJSON(`${API_BASE}/api/feedback`, {
         recommendationId,
         userId,
         helpful,
-        notes: helpful ? "Helpful recommendation" : "Not helpful"
+        notes: helpful ? "Helpful recommendation" : "Not helpful",
       });
       
       setFeedbackGiven(true);
@@ -53,7 +99,7 @@ export function ResultsPage() {
     }
   };
 
-  if (!results) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50 flex items-center justify-center">
         <div className="text-center">
@@ -63,6 +109,24 @@ export function ResultsPage() {
       </div>
     );
   }
+
+  // After loading, if results are null or invalid, show an error message.
+  if (!results || !results.recommendations || !Array.isArray(results.recommendations) || results.recommendations.length === 0) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50 flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-800 mb-4">Could Not Load Recommendations</h1>
+          <p className="text-gray-600 mb-6">The recommendation data is missing or corrupted. Please try again.</p>
+          <Button onClick={() => navigate('/input')} className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Go Back to Form
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  console.log('ResultsPage: Rendering with results:', results);
 
   const getSustainabilityColor = (score: number) => {
     if (score >= 0.8) return "bg-green-500";
@@ -113,10 +177,10 @@ export function ResultsPage() {
             </p>
             <div className="flex justify-center items-center gap-2 mt-4">
               <Badge variant="outline" className="bg-white/80">
-                Model: {results.model_version}
+                Model: {results?.model_version || 'N/A'}
               </Badge>
               <Badge variant="outline" className="bg-white/80">
-                Generated: {new Date(results.timestamp).toLocaleString()}
+                Generated: {results?.timestamp ? new Date(results.timestamp).toLocaleString() : 'N/A'}
               </Badge>
             </div>
           </div>
@@ -124,9 +188,9 @@ export function ResultsPage() {
 
         {/* Recommendations Grid */}
         <div className="grid gap-8 mb-12">
-          {results.recommendations.map((crop, index) => (
+          {results?.recommendations?.map((crop, index) => (
             <Card 
-              key={crop.crop} 
+              key={crop?.crop || index}
               className={`transition-all duration-300 hover:shadow-2xl border-0 bg-white/90 backdrop-blur-sm ${
                 index === 0 ? "ring-2 ring-green-500 shadow-green-100" : ""
               }`}
@@ -141,24 +205,24 @@ export function ResultsPage() {
                     )}
                     <div>
                       <CardTitle className={`text-2xl font-bold flex items-center gap-3 ${index === 0 ? "text-white" : "text-gray-800"}`}>
-                        {crop.crop}
+                        {crop?.crop || 'Unknown Crop'}
                         {index === 0 && <Badge className="bg-white text-green-600 font-semibold">Top Choice</Badge>}
                       </CardTitle>
                       <div className={`flex items-center gap-2 mt-2 ${index === 0 ? "text-white/90" : "text-gray-600"}`}>
                         <BarChart3 className="h-4 w-4" />
                         <span className="text-sm font-medium">
-                          Confidence: {(crop.confidence * 100).toFixed(0)}%
+                          Confidence: {((crop?.confidence || 0) * 100).toFixed(0)}%
                         </span>
-                        <div className={`px-2 py-1 rounded-full text-xs font-medium ${getConfidenceColor(crop.confidence)}`}>
-                          {crop.confidence >= 0.8 ? "Very High" : crop.confidence >= 0.6 ? "High" : "Moderate"}
+                        <div className={`px-2 py-1 rounded-full text-xs font-medium ${getConfidenceColor(crop?.confidence || 0)}`}>
+                          {(crop?.confidence || 0) >= 0.8 ? "Very High" : (crop?.confidence || 0) >= 0.6 ? "High" : "Moderate"}
                         </div>
                       </div>
                     </div>
                   </div>
                   <Badge 
-                    className={`${getSustainabilityColor(crop.sustainability_score)} text-white font-medium px-3 py-1`}
+                    className={`${getSustainabilityColor(crop?.sustainability_score || 0)} text-white font-medium px-3 py-1`}
                   >
-                    {getSustainabilityLabel(crop.sustainability_score)} Sustainability
+                    {getSustainabilityLabel(crop?.sustainability_score || 0)} Sustainability
                   </Badge>
                 </div>
               </CardHeader>
@@ -170,7 +234,7 @@ export function ResultsPage() {
                       <span className="font-semibold text-gray-700">Expected Yield</span>
                     </div>
                     <p className="text-2xl font-bold text-green-600">
-                      {crop.predicted_yield_kg_per_ha.toLocaleString()}
+                      {(crop?.predicted_yield_kg_per_ha || 0).toLocaleString()}
                     </p>
                     <p className="text-sm text-gray-600">kg per hectare</p>
                   </div>
@@ -181,7 +245,7 @@ export function ResultsPage() {
                       <span className="font-semibold text-gray-700">Estimated Profit</span>
                     </div>
                     <p className="text-2xl font-bold text-blue-600">
-                      ₹{crop.estimated_profit_inr.toLocaleString()}
+                      ₹{(crop?.estimated_profit_inr || 0).toLocaleString()}
                     </p>
                     <p className="text-sm text-gray-600">total estimated</p>
                   </div>
@@ -192,14 +256,14 @@ export function ResultsPage() {
                       <span className="font-semibold text-gray-700">Sustainability</span>
                     </div>
                     <p className="text-2xl font-bold text-purple-600">
-                      {(crop.sustainability_score * 100).toFixed(0)}%
+                      {((crop?.sustainability_score || 0) * 100).toFixed(0)}%
                     </p>
                     <p className="text-sm text-gray-600">environmental score</p>
                   </div>
                 </div>
                 
                 <div className="flex justify-center">
-                  <Dialog>
+                  <Dialog open={!!selectedCrop} onOpenChange={(isOpen) => !isOpen && setSelectedCrop(null)}>
                     <DialogTrigger asChild>
                       <Button 
                         variant="outline" 
@@ -208,39 +272,39 @@ export function ResultsPage() {
                         className="px-6 py-3 border-2 border-gray-200 hover:border-green-300 hover:bg-green-50 transition-all duration-200"
                       >
                         <Info className="mr-2 h-5 w-5" />
-                        Why {crop.crop}? View Analysis
+                        Why {crop?.crop || 'this crop'}? View Analysis
                       </Button>
                     </DialogTrigger>
                     <DialogContent className="max-w-2xl">
                       <DialogHeader>
                         <DialogTitle className="text-2xl text-gray-800">
-                          Why we recommend {crop.crop}
+                          Why we recommend {selectedCrop?.crop || 'this crop'}
                         </DialogTitle>
                       </DialogHeader>
                       <div className="space-y-6">
                         <div className="p-4 bg-gray-50 rounded-lg">
-                          <p className="text-gray-700 leading-relaxed">{results.explanation}</p>
+                          <p className="text-gray-700 leading-relaxed">{results?.explanation || 'No explanation available.'}</p>
                         </div>
                         
                         <div>
                           <h4 className="font-semibold text-lg text-gray-800 mb-4">Key Influencing Factors:</h4>
                           <div className="space-y-3">
-                            {results.shap_top_features.map((feature, idx) => (
+                            {results?.shap_top_features?.map((feature, idx) => (
                               <div key={idx} className="flex justify-between items-center p-3 bg-white rounded-lg border">
-                                <span className="capitalize font-medium text-gray-700">{feature.feature.replace('_', ' ')}</span>
+                                <span className="capitalize font-medium text-gray-700">{(feature?.feature || 'N/A').replace('_', ' ')}</span>
                                 <div className="flex items-center gap-3">
                                   <div className="w-24 bg-gray-200 rounded-full h-3">
                                     <div 
                                       className="bg-gradient-to-r from-green-500 to-emerald-500 h-3 rounded-full transition-all duration-500"
-                                      style={{ width: `${feature.impact * 100}%` }}
+                                      style={{ width: `${(feature?.impact || 0) * 100}%` }}
                                     />
                                   </div>
                                   <span className="text-sm font-semibold text-gray-600 min-w-[3rem]">
-                                    {(feature.impact * 100).toFixed(0)}%
+                                    {((feature?.impact || 0) * 100).toFixed(0)}%
                                   </span>
                                 </div>
                               </div>
-                            ))}
+                            )) || <p>No feature importance data available.</p>}
                           </div>
                         </div>
                       </div>

@@ -10,7 +10,24 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/components/ui/use-toast';
 import { MapPin, Info, Loader2, ArrowLeft, CheckCircle2, Droplets, Thermometer, Zap, CloudRain, RefreshCw } from 'lucide-react';
 import { getSoilDefaults } from '../utils/soilDefaults';
-import backend from '~backend/client';
+// Using direct fetch calls to the Express backend instead of the Encore-generated client
+const API_BASE = (import.meta as any).env?.VITE_CLIENT_TARGET || 'http://localhost:4000';
+
+async function getJSON<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`GET ${url} failed: ${res.status}`);
+  return res.json();
+}
+
+async function postJSON<T>(url: string, body: any): Promise<T> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`POST ${url} failed: ${res.status}`);
+  return res.json();
+}
 
 interface FormData {
   latitude: string;
@@ -95,7 +112,15 @@ export function InputForm() {
   const fetchSoilPreview = async (lat: number, lon: number) => {
     setLoadingSoil(true);
     try {
-      const response = await backend.main.getSoilProperties({ lat, lon });
+      const response = await getJSON<{
+        properties: {
+          nitrogen: { mean: number }
+          phosphorus: { mean: number }
+          potassium: { mean: number }
+          phh2o: { mean: number }
+          organic_carbon: { mean: number }
+        }
+      }>(`${API_BASE}/api/soil/properties?lat=${lat}&lon=${lon}`);
       setFormData(prev => ({
         ...prev,
         N: response.properties.nitrogen.mean.toFixed(1),
@@ -123,14 +148,25 @@ export function InputForm() {
   const fetchWeatherPreview = async (lat: number, lon: number) => {
     setLoadingWeather(true);
     try {
-      const response = await backend.main.getCurrentGlobalWeather({ lat, lon });
-      const forecastResponse = await backend.main.getGlobalForecast({ lat, lon });
-      
+      // Express backend provides combined current weather via /api/weather/:lat/:lon
+      const response = await getJSON<{
+        temperature: number; humidity: number; rainfall: number; wind_speed: number;
+        solar_radiation: number; pressure: number; description: string; feels_like: number;
+      }>(`${API_BASE}/api/weather/${lat}/${lon}`);
+
       setWeatherPreview({
-        current: response.weather,
-        forecast: {
-          seasonal_outlook: forecastResponse.forecast.seasonal_outlook
-        }
+        current: {
+          temperature: response.temperature,
+          humidity: response.humidity,
+          rainfall: response.rainfall,
+          wind_speed: response.wind_speed,
+          description: response.description,
+          feels_like: response.feels_like,
+          uv_index: 5,
+          pressure: response.pressure,
+        },
+        // Forecast endpoint is not available on Express mock; provide a helpful placeholder
+        forecast: { seasonal_outlook: 'Favorable conditions expected' },
       });
     } catch (error) {
       console.error('Weather preview error:', error);
@@ -157,24 +193,7 @@ export function InputForm() {
 
   const handleSoilTypeChange = (soilType: string) => {
     setFormData(prev => ({ ...prev, soilType }));
-    
-    // Auto-fill soil values
-    const defaults = getSoilDefaults(soilType);
-    setFormData(prev => ({
-      ...prev,
-      N: defaults.N.toString(),
-      P: defaults.P.toString(), 
-      K: defaults.K.toString(),
-      ph: defaults.ph.toString(),
-      moisture: defaults.moisture.toString(),
-      organicCarbon: defaults.organic_carbon.toString()
-    }));
-    
-    setAutoFilled(true);
-    toast({
-      title: "Soil properties auto-filled",
-      description: `Default values for ${soilType} soil have been applied. You can modify them or use SoilGrids data if available.`,
-    });
+    // Only update soil type, keep existing SoilGrids data
   };
 
   const handleCropSelection = (crop: string, checked: boolean, field: 'previousCrops' | 'preferredCrops') => {
@@ -250,14 +269,14 @@ export function InputForm() {
     try {
       const userId = `user_${Date.now()}`; // In production, get from auth
       
-      const response = await backend.main.recommend({
+      const response = await postJSON(`${API_BASE}/api/recommend`, {
         userId,
         location: {
           lat: parseFloat(formData.latitude),
           lon: parseFloat(formData.longitude)
         },
         soil_type: formData.soilType,
-        area_ha: parseFloat(formData.area),
+        area_acres: parseFloat(formData.area),
         farming_method: formData.farmingMethod,
         irrigation_type: formData.irrigationType,
         previous_crops: formData.previousCrops,
@@ -275,7 +294,9 @@ export function InputForm() {
       });
 
       // Store results in sessionStorage for the results page
+      console.log('InputForm: Storing results in sessionStorage:', response);
       sessionStorage.setItem('cropRecommendations', JSON.stringify(response));
+      console.log('InputForm: Navigating to results page');
       navigate('/results');
       
     } catch (error) {
@@ -397,7 +418,7 @@ export function InputForm() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <Label htmlFor="area" className="text-sm font-medium text-gray-700">
-                    Farm Area (hectares) <span className="text-red-500">*</span>
+                    Farm Area (acres) <span className="text-red-500">*</span>
                   </Label>
                   <Input
                     id="area"
@@ -663,9 +684,9 @@ export function InputForm() {
                     <SelectValue placeholder="Select budget range" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="low">Low (&lt; ₹50,000/hectare)</SelectItem>
-                    <SelectItem value="medium">Medium (₹50,000 - ₹1,00,000/hectare)</SelectItem>
-                    <SelectItem value="high">High (&gt; ₹1,00,000/hectare)</SelectItem>
+                    <SelectItem value="low">Low (&lt; ₹20,000/acre)</SelectItem>
+                    <SelectItem value="medium">Medium (₹20,000 - ₹40,000/acre)</SelectItem>
+                    <SelectItem value="high">High (&gt; ₹40,000/acre)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
